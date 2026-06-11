@@ -243,8 +243,9 @@ class SamaraEnergoApi:
         return account.get("Description") or account.get("AccountID") or ""
 
     async def _get_amount_due(self, contract_account_id: str) -> tuple[float, datetime | None]:
+        safe_id = contract_account_id.replace("'", "''")
         payload = await self._request(
-            f"{SERVICE_PATH}/Invoices/ContractAccounts('{contract_account_id}')",
+            f"{SERVICE_PATH}/ContractAccounts('{safe_id}')/Invoices",
         )
         invoices = [
             item
@@ -303,7 +304,7 @@ class SamaraEnergoApi:
         start_iso = history_start.strftime("%Y-%m-%dT00:00:00")
 
         payload = await self._request(
-            f"{SERVICE_PATH}/ContractConsumptionValues/Contracts('{safe_id}')",
+            f"{SERVICE_PATH}/Contracts('{safe_id}')/ContractConsumptionValues",
             {
                 "$filter": (
                     f"ConsumptionPeriodTypeID eq 'BC' and "
