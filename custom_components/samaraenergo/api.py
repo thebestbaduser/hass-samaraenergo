@@ -274,16 +274,41 @@ class SamaraEnergoApi:
         due_date = _parse_sap_date(invoices[0].get("DueDate"))
         return amount_due, due_date
 
-    async def _get_last_payment(self, contract_account_id: str) -> tuple[float | None, datetime | None]:
+    async def _fetch_payment_documents(
+        self,
+        contract_account_id: str,
+    ) -> list[dict[str, Any]]:
+        """PaymentDocuments is a top-level entity set, not a ContractAccounts nav property."""
         safe_id = contract_account_id.replace("'", "''")
-        payload = await self._request(
-            f"{SERVICE_PATH}/ContractAccounts('{safe_id}')/PaymentDocuments",
-        )
-        payments = [
-            item
-            for item in self._results(payload)
-            if str(item.get("PaymentStatusID")) == "9"
+        attempts: list[tuple[str, dict[str, Any] | None]] = [
+            (
+                f"{SERVICE_PATH}/PaymentDocuments",
+                {"$filter": f"ContractAccountID eq '{safe_id}'"},
+            ),
+            (f"{SERVICE_PATH}/PaymentDocuments", None),
         ]
+        for path, params in attempts:
+            try:
+                payload = await self._request(path, params)
+            except SamaraEnergoApiError as err:
+                _LOGGER.debug("PaymentDocuments request failed for %s: %s", path, err)
+                continue
+            results = self._results(payload)
+            if results:
+                return results
+        return []
+
+    async def _get_last_payment(self, contract_account_id: str) -> tuple[float | None, datetime | None]:
+        try:
+            payments = [
+                item
+                for item in await self._fetch_payment_documents(contract_account_id)
+                if str(item.get("PaymentStatusID")) == "9"
+            ]
+        except SamaraEnergoApiError as err:
+            _LOGGER.warning("Unable to load payment documents: %s", err)
+            return None, None
+
         if not payments:
             return None, None
 
