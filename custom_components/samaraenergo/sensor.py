@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, CURRENCY_RUB
+from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -66,7 +66,7 @@ class SamaraEnergoBaseSensor(CoordinatorEntity, SensorEntity):
 
 class SamaraEnergoAmountDueSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_AMOUNT_DUE
-    _attr_native_unit_of_measurement = CURRENCY_RUB
+    _attr_native_unit_of_measurement = "RUB"
     _attr_icon = "mdi:cash-clock"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
@@ -98,7 +98,7 @@ class SamaraEnergoDueDateSensor(SamaraEnergoBaseSensor):
 
 class SamaraEnergoLastPaymentSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_LAST_PAYMENT
-    _attr_native_unit_of_measurement = CURRENCY_RUB
+    _attr_native_unit_of_measurement = "RUB"
     _attr_icon = "mdi:cash-check"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
@@ -182,7 +182,7 @@ class SamaraEnergoAvgMonthlyConsumptionSensor(SamaraEnergoBaseSensor):
 
 class SamaraEnergoAvgMonthlyCostSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_AVG_MONTHLY_COST
-    _attr_native_unit_of_measurement = CURRENCY_RUB
+    _attr_native_unit_of_measurement = "RUB"
     _attr_icon = "mdi:chart-line"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:

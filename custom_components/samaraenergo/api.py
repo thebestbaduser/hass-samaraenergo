@@ -274,35 +274,16 @@ class SamaraEnergoApi:
         due_date = _parse_sap_date(invoices[0].get("DueDate"))
         return amount_due, due_date
 
-    async def _fetch_payment_documents(
-        self,
-        contract_account_id: str,
-    ) -> list[dict[str, Any]]:
-        """PaymentDocuments is a top-level entity set, not a ContractAccounts nav property."""
-        safe_id = contract_account_id.replace("'", "''")
-        attempts: list[tuple[str, dict[str, Any] | None]] = [
-            (
-                f"{SERVICE_PATH}/PaymentDocuments",
-                {"$filter": f"ContractAccountID eq '{safe_id}'"},
-            ),
-            (f"{SERVICE_PATH}/PaymentDocuments", None),
-        ]
-        for path, params in attempts:
-            try:
-                payload = await self._request(path, params)
-            except SamaraEnergoApiError as err:
-                _LOGGER.debug("PaymentDocuments request failed for %s: %s", path, err)
-                continue
-            results = self._results(payload)
-            if results:
-                return results
-        return []
+    async def _fetch_payment_documents(self) -> list[dict[str, Any]]:
+        """PaymentDocuments is scoped to the authenticated account session."""
+        payload = await self._request(f"{SERVICE_PATH}/PaymentDocuments")
+        return self._results(payload)
 
-    async def _get_last_payment(self, contract_account_id: str) -> tuple[float | None, datetime | None]:
+    async def _get_last_payment(self) -> tuple[float | None, datetime | None]:
         try:
             payments = [
                 item
-                for item in await self._fetch_payment_documents(contract_account_id)
+                for item in await self._fetch_payment_documents()
                 if str(item.get("PaymentStatusID")) == "9"
             ]
         except SamaraEnergoApiError as err:
@@ -390,7 +371,7 @@ class SamaraEnergoApi:
         device_id = devices[0].get("DeviceID") if devices else ""
 
         amount_due, due_date = await self._get_amount_due(contract_account_id)
-        last_payment_amount, last_payment_date = await self._get_last_payment(contract_account_id)
+        last_payment_amount, last_payment_date = await self._get_last_payment()
         last_reading_kwh, last_reading_date = (
             await self._get_last_reading(device_id) if device_id else (None, None)
         )
