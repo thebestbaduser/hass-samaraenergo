@@ -12,13 +12,24 @@
 - среднемесячное потребление и затраты
 - история потребления по месяцам (для графиков)
 
+## Публикация на GitHub
+
+```powershell
+cd C:\Users\gos_ant\Projects\hass-samaraenergo
+.\scripts\publish.ps1
+```
+
+Если `gh` не установлен, скрипт подскажет создать репозиторий на https://github.com/new и выполнить `git push`.
+
+Опционально: [GitHub CLI](https://cli.github.com/) для автоматического создания репозитория.
+
 ## Установка через HACS
 
 1. HACS → Интеграции → три точки → **Пользовательские репозитории**
 2. Добавьте репозиторий:
 
 ```
-https://github.com/gos_ant/hass-samaraenergo
+https://github.com/thebestbaduser/hass-samaraenergo
 ```
 
 Тип: **Integration**

@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import quote
-
 import aiohttp
 
 from .const import (
@@ -83,6 +81,13 @@ class SamaraEnergoApi:
         self.password = password
         self._session = session
 
+    @staticmethod
+    def _headers() -> dict[str, str]:
+        return {
+            "Accept": "application/json",
+            "X-REQUESTED-WITH": "XMLHttpRequest",
+        }
+
     def _auth_params(self) -> dict[str, str]:
         return {
             "sap-language": "RU",
@@ -97,13 +102,17 @@ class SamaraEnergoApi:
         async with self._session.get(
             url,
             params=query,
+            headers=self._headers(),
             timeout=aiohttp.ClientTimeout(total=60),
         ) as response:
             text = await response.text()
+            _LOGGER.debug("GET %s status=%s body=%s", path, response.status, text[:300])
             if response.status == 401:
                 raise SamaraEnergoAuthError("Invalid username or password")
             if response.status >= 400:
                 raise SamaraEnergoApiError(f"HTTP {response.status} for {path}: {text[:300]}")
+            if not text.strip():
+                return {}
             try:
                 return await response.json(content_type=None)
             except aiohttp.ContentTypeError as err:
@@ -129,10 +138,8 @@ class SamaraEnergoApi:
         data = payload.get("d", payload)
         return data if isinstance(data, dict) else {}
 
-    async def validate_credentials(self) -> None:
-        if len(self.username) != ACCOUNT_NUMBER_LENGTH or not self.username.isdigit():
-            raise SamaraEnergoAuthError("Account number must contain exactly 12 digits")
-
+    async def _preauth_session(self) -> None:
+        """Mirror browser login: warm SAP session before OData calls."""
         url = f"{BASE_URL}{AUTH_CHECK_PATH}"
         params = {
             "sap-language": "RU",
@@ -142,25 +149,54 @@ class SamaraEnergoApi:
         async with self._session.get(
             url,
             params=params,
+            headers=self._headers(),
+            allow_redirects=False,
             timeout=aiohttp.ClientTimeout(total=30),
         ) as response:
             text = await response.text()
-            if text and "Пароль начальный" not in text:
-                raise SamaraEnergoAuthError("Authorization failed")
+            _LOGGER.debug("Pre-auth status=%s body=%s", response.status, text[:300])
+            if "Авторизация не удалась" in text:
+                raise SamaraEnergoAuthError("Invalid username or password")
+            if text and "Пароль начальный" not in text and response.status >= 400:
+                raise SamaraEnergoAuthError("Invalid username or password")
 
-        payload = await self._request(
-            f"{SERVICE_PATH}/PasswordStatSet('{self.username}')",
+    async def _get_password_stat(self) -> int | None:
+        payload = await self._request(f"{SERVICE_PATH}/PasswordStatSet('{self.username}')")
+        entity = self._entity(payload)
+        for key in ("PassStat", "passStat", "PASS_STAT"):
+            if key in entity:
+                try:
+                    return int(entity[key])
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    async def validate_credentials(self) -> None:
+        if len(self.username) != ACCOUNT_NUMBER_LENGTH or not self.username.isdigit():
+            raise SamaraEnergoAuthError("Account number must contain exactly 12 digits")
+
+        await self._preauth_session()
+
+        accounts = self._results(
+            await self._request(
+                f"{SERVICE_PATH}/Accounts",
+                {"$expand": "ContractAccounts,ContractAccounts/Contracts/Premise"},
+            )
         )
-        pass_stat = self._entity(payload).get("PassStat")
-        if str(pass_stat) not in {"2", "1"}:
+        if not accounts:
+            raise SamaraEnergoAuthError("Invalid username or password")
+
+        pass_stat = await self._get_password_stat()
+        if pass_stat is None:
+            raise SamaraEnergoApiError("Password status is unavailable")
+        if pass_stat not in {1, 2}:
             raise SamaraEnergoAuthError("Account is blocked or unavailable")
 
     async def _get_account(self) -> dict[str, Any]:
+        await self._preauth_session()
         payload = await self._request(
             f"{SERVICE_PATH}/Accounts",
-            {
-                "$expand": "ContractAccounts,ContractAccounts/Contracts/Premise",
-            },
+            {"$expand": "ContractAccounts,ContractAccounts/Contracts/Premise"},
         )
         accounts = self._results(payload)
         if not accounts:
@@ -191,10 +227,15 @@ class SamaraEnergoApi:
         premise = contract.get("Premise", {})
         if isinstance(premise, dict) and premise.get("results"):
             premise = premise["results"][0]
+        elif isinstance(premise, dict) and premise.get("AddressInfo"):
+            info = premise["AddressInfo"]
+            if isinstance(info, dict) and info.get("ShortForm"):
+                return info["ShortForm"]
+
         parts = [
-            premise.get("City"),
-            premise.get("Street"),
-            premise.get("HouseNumber"),
+            premise.get("City") if isinstance(premise, dict) else None,
+            premise.get("Street") if isinstance(premise, dict) else None,
+            premise.get("HouseNumber") if isinstance(premise, dict) else None,
         ]
         address = ", ".join(part for part in parts if part)
         if address:
@@ -232,8 +273,9 @@ class SamaraEnergoApi:
         return _to_float(completed.get("Amount")), _parse_sap_date(completed.get("ExecutionDate"))
 
     async def _get_last_reading(self, device_id: str) -> tuple[float | None, datetime | None]:
+        safe_id = device_id.replace("'", "''")
         payload = await self._request(
-            f"{SERVICE_PATH}/Devices('{quote(device_id, safe='')}')",
+            f"{SERVICE_PATH}/Devices('{safe_id}')",
             {"$expand": "MeterReadingResults"},
         )
         entity = self._entity(payload)
@@ -247,22 +289,21 @@ class SamaraEnergoApi:
         return _to_float(last.get("ReadingResult")), _parse_sap_date(last.get("ReadingDateTime"))
 
     async def _get_consumption_history(self, contract_id: str) -> list[ConsumptionPoint]:
+        safe_id = contract_id.replace("'", "''")
         period_payload = await self._request(
             f"{SERVICE_PATH}/GetCurrentBillingPeriod",
-            {"ContractID": f"'{contract_id}'"},
+            {"ContractID": f"'{safe_id}'"},
         )
         period = self._entity(period_payload)
         start_date = _parse_sap_date(period.get("StartDate"))
         if not start_date:
             start_date = datetime.now(tz=UTC)
 
-        from datetime import timedelta
-
         history_start = start_date - timedelta(days=730)
         start_iso = history_start.strftime("%Y-%m-%dT00:00:00")
 
         payload = await self._request(
-            f"{SERVICE_PATH}/ContractConsumptionValues/Contracts('{contract_id}')",
+            f"{SERVICE_PATH}/ContractConsumptionValues/Contracts('{safe_id}')",
             {
                 "$filter": (
                     f"ConsumptionPeriodTypeID eq 'BC' and "
