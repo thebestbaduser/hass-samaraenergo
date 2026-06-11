@@ -1,0 +1,11 @@
+{
+  "domain": "samaraenergo",
+  "name": "Самараэнерго",
+  "codeowners": ["@gos_ant"],
+  "config_flow": true,
+  "documentation": "https://github.com/gos_ant/hass-samaraenergo",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": ["aiohttp>=3.9"],
+  "version": "0.1.0"
+}

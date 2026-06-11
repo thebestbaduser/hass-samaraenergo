@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Самараэнерго",
+        "description": "Введите номер лицевого счёта (12 цифр) и пароль от личного кабинета.",
+        "data": {
+          "username": "Номер лицевого счёта",
+          "password": "Пароль"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Неверный логин или пароль",
+      "invalid_account": "Номер лицевого счёта должен содержать 12 цифр",
+      "cannot_connect": "Не удалось подключиться к lk.samaraenergo.ru"
+    },
+    "abort": {
+      "already_configured": "Этот лицевой счёт уже добавлен"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки Самараэнерго",
+        "data": {
+          "scan_interval": "Интервал обновления (секунды)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "amount_due": { "name": "К оплате" },
+      "due_date": { "name": "Оплатить до" },
+      "last_payment": { "name": "Последний платёж" },
+      "last_payment_date": { "name": "Дата последнего платежа" },
+      "last_reading": { "name": "Показания счётчика" },
+      "last_reading_date": { "name": "Дата показаний" },
+      "avg_monthly_consumption": { "name": "Среднемесячное потребление" },
+      "avg_monthly_cost": { "name": "Среднемесячные затраты" },
+      "consumption_history": { "name": "История потребления" }
+    }
+  }
+}
