@@ -180,7 +180,13 @@ class SamaraEnergoApi:
         accounts = self._results(
             await self._request(
                 f"{SERVICE_PATH}/Accounts",
-                {"$expand": "ContractAccounts,ContractAccounts/Contracts/Premise"},
+                {
+                    "$expand": (
+                        "ContractAccounts,"
+                        "ContractAccounts/Contracts/Premise,"
+                        "ContractAccounts/Contracts/Devices"
+                    )
+                },
             )
         )
         if not accounts:
@@ -196,7 +202,13 @@ class SamaraEnergoApi:
         await self._preauth_session()
         payload = await self._request(
             f"{SERVICE_PATH}/Accounts",
-            {"$expand": "ContractAccounts,ContractAccounts/Contracts/Premise"},
+            {
+                "$expand": (
+                    "ContractAccounts,"
+                    "ContractAccounts/Contracts/Premise,"
+                    "ContractAccounts/Contracts/Devices"
+                )
+            },
         )
         accounts = self._results(payload)
         if not accounts:
@@ -262,15 +274,24 @@ class SamaraEnergoApi:
         due_date = _parse_sap_date(invoices[0].get("DueDate"))
         return amount_due, due_date
 
-    async def _get_last_payment(self) -> tuple[float | None, datetime | None]:
-        payload = await self._request(f"{SERVICE_PATH}/PaymentDocuments")
-        payments = self._results(payload)
-        completed = next(
-            (item for item in payments if str(item.get("PaymentStatusID")) == "9"),
-            None,
+    async def _get_last_payment(self, contract_account_id: str) -> tuple[float | None, datetime | None]:
+        safe_id = contract_account_id.replace("'", "''")
+        payload = await self._request(
+            f"{SERVICE_PATH}/ContractAccounts('{safe_id}')/PaymentDocuments",
         )
-        if not completed:
+        payments = [
+            item
+            for item in self._results(payload)
+            if str(item.get("PaymentStatusID")) == "9"
+        ]
+        if not payments:
             return None, None
+
+        completed = max(
+            payments,
+            key=lambda item: _parse_sap_date(item.get("ExecutionDate"))
+            or datetime.min.replace(tzinfo=UTC),
+        )
         return _to_float(completed.get("Amount")), _parse_sap_date(completed.get("ExecutionDate"))
 
     async def _get_last_reading(self, device_id: str) -> tuple[float | None, datetime | None]:
@@ -344,7 +365,7 @@ class SamaraEnergoApi:
         device_id = devices[0].get("DeviceID") if devices else ""
 
         amount_due, due_date = await self._get_amount_due(contract_account_id)
-        last_payment_amount, last_payment_date = await self._get_last_payment()
+        last_payment_amount, last_payment_date = await self._get_last_payment(contract_account_id)
         last_reading_kwh, last_reading_date = (
             await self._get_last_reading(device_id) if device_id else (None, None)
         )
