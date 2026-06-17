@@ -1,58 +1,56 @@
 # Самараэнерго для Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/thebestbaduser/hass-samaraenergo?label=release)](https://github.com/thebestbaduser/hass-samaraenergo/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Интеграция [ПАО «Самараэнерго»](https://lk.samaraenergo.ru/) для Home Assistant.
+Неофициальная интеграция [личного кабинета ПАО «Самараэнерго»](https://lk.samaraenergo.ru/) для [Home Assistant](https://www.home-assistant.io/).
 
-Только чтение данных из личного кабинета:
+> **Важно.** Проект разработан сообществом и **не связан** с ПАО «Самараэнерго».  
+> Используются только публичные API личного кабинета. Интеграция работает в режиме **только чтения** — оплата и изменение данных в ЛК недоступны.
 
-- сумма к оплате и срок оплаты
-- последний платёж
-- показания счётчика (АСКУЭ)
-- среднемесячное потребление и затраты
-- история потребления по месяцам (для графиков)
+## Возможности
 
-## Публикация на GitHub
+- сумма к оплате и срок оплаты;
+- последний платёж и дата платежа;
+- показания счётчика (АСКУЭ);
+- среднемесячное потребление и затраты;
+- история потребления по месяцам (для графиков в Lovelace).
 
-```powershell
-cd C:\Users\gos_ant\Projects\hass-samaraenergo
-.\scripts\publish.ps1
-```
+## Требования
 
-Если `gh` не установлен, скрипт подскажет создать репозиторий на https://github.com/new и выполнить `git push`.
-
-Опционально: [GitHub CLI](https://cli.github.com/) для автоматического создания репозитория.
+- Home Assistant **2024.1** или новее;
+- [HACS](https://hacs.xyz/) (рекомендуется) или ручная установка;
+- учётная запись на [lk.samaraenergo.ru](https://lk.samaraenergo.ru/).
 
 ## Установка через HACS
 
-1. HACS → Интеграции → три точки → **Пользовательские репозитории**
+1. HACS → **Интеграции** → ⋮ → **Пользовательские репозитории**.
 2. Добавьте репозиторий:
 
-```
-https://github.com/thebestbaduser/hass-samaraenergo
-```
+   ```
+   https://github.com/thebestbaduser/hass-samaraenergo
+   ```
 
-Тип: **Integration**
+   Тип: **Integration**.
 
-3. Найдите **Самараэнерго** и установите
-4. Перезапустите Home Assistant
+3. Найдите **Самараэнерго** → **Установить**.
+4. Перезапустите Home Assistant.
 
-## Установка вручную (Docker)
+## Установка вручную
 
-Скопируйте `custom_components/samaraenergo` в `/config/custom_components/` и перезапустите HA.
-
-```yaml
-# docker-compose.yml — пример volume
-volumes:
-  - ./config:/config
-```
+Скопируйте каталог `custom_components/samaraenergo` в `/config/custom_components/` и перезапустите Home Assistant.
 
 ## Настройка
 
 **Настройки → Устройства и службы → Добавить интеграцию → Самараэнерго**
 
-- **Номер лицевого счёта** — 12 цифр (например `205000093620`)
-- **Пароль** — от личного кабинета
+| Поле | Описание |
+|------|----------|
+| Номер лицевого счёта | Ровно **12 цифр**, без пробелов |
+| Пароль | Пароль от [личного кабинета](https://lk.samaraenergo.ru/) |
+
+После добавления в карточке устройства можно изменить **интервал обновления** (от 15 минут до суток, по умолчанию — 1 час).
 
 ## Сенсоры
 
@@ -70,14 +68,31 @@ volumes:
 
 ## График в Lovelace
 
-У `sensor.*_consumption_history` в attributes:
+У сенсора `sensor.*_consumption_history` в attributes доступны:
 
-- `history_months` — месяцы
-- `history_kwh` — потребление
-- `history_costs` — затраты
+- `history_months` — месяцы;
+- `history_kwh` — потребление, кВт·ч;
+- `history_costs` — затраты, ₽.
 
-Подходит для `apexcharts-card` и `mini-graph-card`.
+Подходит для [apexcharts-card](https://github.com/RomRider/apexcharts-card) и [mini-graph-card](https://github.com/kalkih/mini-graph-card).
+
+## Отладка
+
+При проблемах с входом добавьте в `configuration.yaml`:
+
+```yaml
+logger:
+  logs:
+    custom_components.samaraenergo: debug
+```
+
+Перезапустите Home Assistant и проверьте **Настройки → Система → Логи** (фильтр `samaraenergo`).
+
+## Ссылки
+
+- Личный кабинет: [lk.samaraenergo.ru](https://lk.samaraenergo.ru/)
+- Репозиторий: [github.com/thebestbaduser/hass-samaraenergo](https://github.com/thebestbaduser/hass-samaraenergo)
 
 ## Лицензия
 
-MIT
+[MIT](LICENSE) © [thebestbaduser](https://github.com/thebestbaduser)
