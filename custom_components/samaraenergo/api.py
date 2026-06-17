@@ -225,7 +225,7 @@ class SamaraEnergoApi:
             (f"{SERVICE_PATH}/Contracts('{safe_id}')/RateCategory", None),
             (
                 f"{SERVICE_PATH}/Contracts('{safe_id}')",
-                {"$expand": "RateCategory,Division,Product"},
+                {"$expand": "RateCategory"},
             ),
             (
                 f"{SERVICE_PATH}/Contracts('{safe_id}')",
@@ -306,9 +306,7 @@ class SamaraEnergoApi:
                     "$expand": (
                         "ContractAccounts,"
                         "ContractAccounts/Contracts/Premise,"
-                        "ContractAccounts/Contracts/Devices,"
-                        "ContractAccounts/Contracts/Division,"
-                        "ContractAccounts/Contracts/Product"
+                        "ContractAccounts/Contracts/Devices"
                     )
                 },
             )
@@ -330,9 +328,7 @@ class SamaraEnergoApi:
                 "$expand": (
                     "ContractAccounts,"
                     "ContractAccounts/Contracts/Premise,"
-                    "ContractAccounts/Contracts/Devices,"
-                    "ContractAccounts/Contracts/Division,"
-                    "ContractAccounts/Contracts/Product"
+                    "ContractAccounts/Contracts/Devices"
                 )
             },
         )
