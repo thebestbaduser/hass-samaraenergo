@@ -213,25 +213,112 @@ class SamaraEnergoApi:
         visit(payload)
         return rates
 
-    async def _get_tariff(self, contract_id: str, contract: dict[str, Any]) -> TariffInfo:
-        safe_id = contract_id.replace("'", "''")
-        info = TariffInfo(tariff_type=self._extract_tariff_type_name(contract))
+    @classmethod
+    def _parse_inline_tariff(cls, entity: dict[str, Any]) -> TariffInfo:
+        info = TariffInfo(tariff_type=cls._extract_tariff_type_name(entity))
+        rates = cls._parse_tariff_rates(entity)
+        info.day_rate_rub = rates.get("day")
+        info.night_rate_rub = rates.get("night")
+
+        day_keys = (
+            "DayRate",
+            "RateDay",
+            "TariffDay",
+            "PriceDay",
+            "DayPrice",
+            "RateAmountDay",
+            "DayTariff",
+        )
+        night_keys = (
+            "NightRate",
+            "RateNight",
+            "TariffNight",
+            "PriceNight",
+            "NightPrice",
+            "RateAmountNight",
+            "NightTariff",
+        )
+        for key in day_keys:
+            if info.day_rate_rub is None:
+                info.day_rate_rub = _to_float(entity.get(key))
+        for key in night_keys:
+            if info.night_rate_rub is None:
+                info.night_rate_rub = _to_float(entity.get(key))
+        return info
+
+    @classmethod
+    def _merge_tariff(cls, target: TariffInfo, source: TariffInfo) -> None:
+        if source.tariff_type and not target.tariff_type:
+            target.tariff_type = source.tariff_type
+        if source.day_rate_rub is not None and target.day_rate_rub is None:
+            target.day_rate_rub = source.day_rate_rub
+        if source.night_rate_rub is not None and target.night_rate_rub is None:
+            target.night_rate_rub = source.night_rate_rub
+
+    @classmethod
+    def _tariff_from_payload(cls, payload: Any, entity: dict[str, Any] | None = None) -> TariffInfo:
+        info = cls._parse_inline_tariff(entity or cls._entity(payload))
+        rates = cls._parse_tariff_rates(payload)
+        if rates.get("day") is not None:
+            info.day_rate_rub = rates["day"]
+        if rates.get("night") is not None:
+            info.night_rate_rub = rates["night"]
+        return info
+
+    @classmethod
+    def _tariff_complete(cls, info: TariffInfo) -> bool:
+        return bool(
+            info.tariff_type
+            and info.day_rate_rub is not None
+            and info.night_rate_rub is not None
+        )
+
+    async def _get_tariff(
+        self,
+        contract_id: str,
+        contract: dict[str, Any],
+        contract_account_id: str,
+    ) -> TariffInfo:
+        safe_contract = contract_id.replace("'", "''")
+        safe_account = contract_account_id.replace("'", "''")
+        info = self._parse_inline_tariff(contract)
 
         attempts: list[tuple[str, dict[str, Any] | None]] = [
+            (f"{SERVICE_PATH}/Contracts('{safe_contract}')", None),
+            (f"{SERVICE_PATH}/Contracts('{safe_contract}')", {"$expand": "Division"}),
+            (f"{SERVICE_PATH}/RateCategorySet('{safe_contract}')", None),
+            (f"{SERVICE_PATH}/RateCategorySet('{self.username}')", None),
+            (f"{SERVICE_PATH}/ContractRateCategorySet('{safe_contract}')", None),
+            (f"{SERVICE_PATH}/TariffSet('{safe_contract}')", None),
+            (f"{SERVICE_PATH}/RateInfoSet('{safe_contract}')", None),
             (
-                f"{SERVICE_PATH}/Contracts('{safe_id}')/RateCategory",
-                {"$expand": "RateSteps,RateCategorySteps,Facts"},
-            ),
-            (f"{SERVICE_PATH}/Contracts('{safe_id}')/RateCategory", None),
-            (
-                f"{SERVICE_PATH}/Contracts('{safe_id}')",
-                {"$expand": "RateCategory"},
+                f"{SERVICE_PATH}/GetRateCategory",
+                {"ContractID": f"'{safe_contract}'"},
             ),
             (
-                f"{SERVICE_PATH}/Contracts('{safe_id}')",
-                {"$expand": "RateCategory/RateSteps,RateCategory/RateCategorySteps"},
+                f"{SERVICE_PATH}/GetTariffInfo",
+                {"ContractID": f"'{safe_contract}'"},
             ),
+            (
+                f"{SERVICE_PATH}/GetContractTariff",
+                {"ContractID": f"'{safe_contract}'"},
+            ),
+            (
+                f"{SERVICE_PATH}/ContractAccounts('{safe_account}')/Contracts('{safe_contract}')",
+                None,
+            ),
+            (f"{SERVICE_PATH}/ContractAccounts('{safe_account}')", {"$expand": "Contracts"}),
         ]
+
+        division_id = contract.get("DivisionID")
+        if division_id:
+            safe_division = str(division_id).replace("'", "''")
+            attempts.extend(
+                [
+                    (f"{SERVICE_PATH}/Division('{safe_division}')", None),
+                    (f"{SERVICE_PATH}/Divisions('{safe_division}')", None),
+                ]
+            )
 
         for path, params in attempts:
             try:
@@ -240,15 +327,9 @@ class SamaraEnergoApi:
                 _LOGGER.debug("Tariff request failed for %s: %s", path, err)
                 continue
 
-            entity = self._entity(payload)
-            if not info.tariff_type:
-                info.tariff_type = self._extract_tariff_type_name(entity)
-
-            parsed = self._parse_tariff_rates(payload)
-            info.day_rate_rub = parsed.get("day", info.day_rate_rub)
-            info.night_rate_rub = parsed.get("night", info.night_rate_rub)
-
-            if info.tariff_type and info.day_rate_rub is not None and info.night_rate_rub is not None:
+            self._merge_tariff(info, self._tariff_from_payload(payload))
+            if self._tariff_complete(info):
+                _LOGGER.debug("Tariff loaded from %s", path)
                 break
 
         return info
@@ -502,7 +583,7 @@ class SamaraEnergoApi:
         tariff = TariffInfo()
         if contract_id:
             try:
-                tariff = await self._get_tariff(contract_id, contract)
+                tariff = await self._get_tariff(contract_id, contract, contract_account_id)
             except SamaraEnergoApiError as err:
                 _LOGGER.warning("Unable to load tariff information: %s", err)
 

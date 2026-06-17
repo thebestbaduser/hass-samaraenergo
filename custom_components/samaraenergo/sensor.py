@@ -172,7 +172,6 @@ class SamaraEnergoAvgMonthlyConsumptionSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_AVG_MONTHLY_CONSUMPTION
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:chart-bar"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
