@@ -39,7 +39,10 @@
       "last_reading_date": { "name": "Дата показаний" },
       "avg_monthly_consumption": { "name": "Среднемесячное потребление" },
       "avg_monthly_cost": { "name": "Среднемесячные затраты" },
-      "consumption_history": { "name": "История потребления" }
+      "consumption_history": { "name": "История потребления" },
+      "tariff_type": { "name": "Тип тарифа" },
+      "tariff_day": { "name": "Тариф день" },
+      "tariff_night": { "name": "Тариф ночь" }
     }
   }
 }

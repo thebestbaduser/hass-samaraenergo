@@ -35,6 +35,13 @@ class ConsumptionPoint:
 
 
 @dataclass
+class TariffInfo:
+    tariff_type: str | None = None
+    day_rate_rub: float | None = None
+    night_rate_rub: float | None = None
+
+
+@dataclass
 class SamaraEnergoData:
     account_number: str
     address: str
@@ -48,6 +55,7 @@ class SamaraEnergoData:
     avg_monthly_consumption_kwh: float | None
     avg_monthly_cost_rub: float | None
     consumption_history: list[ConsumptionPoint] = field(default_factory=list)
+    tariff: TariffInfo = field(default_factory=TariffInfo)
 
 
 def _parse_sap_date(value: Any) -> datetime | None:
@@ -132,6 +140,120 @@ class SamaraEnergoApi:
         return []
 
     @staticmethod
+    def _first_text(entity: dict[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = entity.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for nested_key in ("Description", "ShortForm", "Name"):
+                    nested = value.get(nested_key)
+                    if isinstance(nested, str) and nested.strip():
+                        return nested.strip()
+        return None
+
+    @classmethod
+    def _extract_tariff_type_name(cls, entity: dict[str, Any]) -> str | None:
+        rate_category = entity.get("RateCategory", {})
+        if isinstance(rate_category, dict) and rate_category.get("results"):
+            rate_category = rate_category["results"][0]
+
+        for candidate in (
+            cls._first_text(entity, "RateCategoryDescription", "TariffTypeDescription", "Description"),
+            cls._first_text(rate_category if isinstance(rate_category, dict) else {}, "Description"),
+            cls._first_text(entity.get("Product", {}) if isinstance(entity.get("Product"), dict) else {}, "Description"),
+            cls._first_text(entity.get("Division", {}) if isinstance(entity.get("Division"), dict) else {}, "Description"),
+        ):
+            if candidate:
+                return candidate
+        return None
+
+    @classmethod
+    def _label_zone(cls, label: str) -> str | None:
+        normalized = label.casefold()
+        if any(token in normalized for token in ("ноч", "night", "offpeak", "off-peak", "off_peak")):
+            return "night"
+        if any(token in normalized for token in ("день", "day", "peak", "пик", "днев")):
+            return "day"
+        return None
+
+    @classmethod
+    def _parse_tariff_rates(cls, payload: Any) -> dict[str, float]:
+        rates: dict[str, float] = {}
+
+        def visit(node: Any) -> None:
+            if isinstance(node, dict):
+                label = cls._first_text(
+                    node,
+                    "Description",
+                    "RateStepDescription",
+                    "TimeOfUseDescription",
+                    "OperandDescription",
+                    "MeterReadingCategoryDescription",
+                    "RateTypeDescription",
+                )
+                price = _to_float(
+                    node.get("Price")
+                    or node.get("Amount")
+                    or node.get("RateAmount")
+                    or node.get("PricePerKWH")
+                    or node.get("Value")
+                    or node.get("Rate")
+                )
+                if label and price is not None:
+                    zone = cls._label_zone(label)
+                    if zone:
+                        rates[zone] = price
+                for value in node.values():
+                    visit(value)
+            elif isinstance(node, list):
+                for item in node:
+                    visit(item)
+
+        visit(payload)
+        return rates
+
+    async def _get_tariff(self, contract_id: str, contract: dict[str, Any]) -> TariffInfo:
+        safe_id = contract_id.replace("'", "''")
+        info = TariffInfo(tariff_type=self._extract_tariff_type_name(contract))
+
+        attempts: list[tuple[str, dict[str, Any] | None]] = [
+            (
+                f"{SERVICE_PATH}/Contracts('{safe_id}')/RateCategory",
+                {"$expand": "RateSteps,RateCategorySteps,Facts"},
+            ),
+            (f"{SERVICE_PATH}/Contracts('{safe_id}')/RateCategory", None),
+            (
+                f"{SERVICE_PATH}/Contracts('{safe_id}')",
+                {"$expand": "RateCategory,Division,Product"},
+            ),
+            (
+                f"{SERVICE_PATH}/Contracts('{safe_id}')",
+                {"$expand": "RateCategory/RateSteps,RateCategory/RateCategorySteps"},
+            ),
+        ]
+
+        for path, params in attempts:
+            try:
+                payload = await self._request(path, params)
+            except SamaraEnergoApiError as err:
+                _LOGGER.debug("Tariff request failed for %s: %s", path, err)
+                continue
+
+            entity = self._entity(payload)
+            if not info.tariff_type:
+                info.tariff_type = self._extract_tariff_type_name(entity)
+
+            parsed = self._parse_tariff_rates(payload)
+            info.day_rate_rub = parsed.get("day", info.day_rate_rub)
+            info.night_rate_rub = parsed.get("night", info.night_rate_rub)
+
+            if info.tariff_type and info.day_rate_rub is not None and info.night_rate_rub is not None:
+                break
+
+        return info
+
+    @staticmethod
     def _entity(payload: Any) -> dict[str, Any]:
         if not isinstance(payload, dict):
             return {}
@@ -184,7 +306,9 @@ class SamaraEnergoApi:
                     "$expand": (
                         "ContractAccounts,"
                         "ContractAccounts/Contracts/Premise,"
-                        "ContractAccounts/Contracts/Devices"
+                        "ContractAccounts/Contracts/Devices,"
+                        "ContractAccounts/Contracts/Division,"
+                        "ContractAccounts/Contracts/Product"
                     )
                 },
             )
@@ -206,7 +330,9 @@ class SamaraEnergoApi:
                 "$expand": (
                     "ContractAccounts,"
                     "ContractAccounts/Contracts/Premise,"
-                    "ContractAccounts/Contracts/Devices"
+                    "ContractAccounts/Contracts/Devices,"
+                    "ContractAccounts/Contracts/Division,"
+                    "ContractAccounts/Contracts/Product"
                 )
             },
         )
@@ -377,6 +503,13 @@ class SamaraEnergoApi:
         )
         history = await self._get_consumption_history(contract_id) if contract_id else []
 
+        tariff = TariffInfo()
+        if contract_id:
+            try:
+                tariff = await self._get_tariff(contract_id, contract)
+            except SamaraEnergoApiError as err:
+                _LOGGER.warning("Unable to load tariff information: %s", err)
+
         avg_consumption = None
         avg_cost = None
         if len(history) > 1:
@@ -398,4 +531,5 @@ class SamaraEnergoApi:
             avg_monthly_consumption_kwh=avg_consumption,
             avg_monthly_cost_rub=avg_cost,
             consumption_history=history,
+            tariff=tariff,
         )

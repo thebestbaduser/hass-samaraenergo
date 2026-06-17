@@ -20,6 +20,9 @@ from .const import (
     SENSOR_LAST_PAYMENT_DATE,
     SENSOR_LAST_READING,
     SENSOR_LAST_READING_DATE,
+    SENSOR_TARIFF_DAY,
+    SENSOR_TARIFF_NIGHT,
+    SENSOR_TARIFF_TYPE,
 )
 from .coordinator import SamaraEnergoCoordinator
 
@@ -41,6 +44,9 @@ async def async_setup_entry(
             SamaraEnergoAvgMonthlyConsumptionSensor(coordinator, entry),
             SamaraEnergoAvgMonthlyCostSensor(coordinator, entry),
             SamaraEnergoConsumptionHistorySensor(coordinator, entry),
+            SamaraEnergoTariffTypeSensor(coordinator, entry),
+            SamaraEnergoTariffDaySensor(coordinator, entry),
+            SamaraEnergoTariffNightSensor(coordinator, entry),
         ]
     )
 
@@ -231,3 +237,50 @@ class SamaraEnergoConsumptionHistorySensor(SamaraEnergoBaseSensor):
             "history_months": [point.month for point in history],
             "history_costs": [point.cost for point in history if point.cost is not None],
         }
+
+
+class SamaraEnergoTariffTypeSensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_TARIFF_TYPE
+    _attr_icon = "mdi:tag-text"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_TARIFF_TYPE}"
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.tariff.tariff_type
+
+
+class SamaraEnergoTariffDaySensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_TARIFF_DAY
+    _attr_native_unit_of_measurement = "RUB/kWh"
+    _attr_icon = "mdi:weather-sunny"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_TARIFF_DAY}"
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.tariff.day_rate_rub
+
+
+class SamaraEnergoTariffNightSensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_TARIFF_NIGHT
+    _attr_native_unit_of_measurement = "RUB/kWh"
+    _attr_icon = "mdi:weather-night"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_TARIFF_NIGHT}"
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.tariff.night_rate_rub
