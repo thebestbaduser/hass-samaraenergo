@@ -42,6 +42,7 @@
       "consumption_history": { "name": "История потребления" },
       "tariff_type": { "name": "Тип тарифа" },
       "tariff_day": { "name": "Тариф день" },
+      "tariff_semi_peak": { "name": "Тариф полупик" },
       "tariff_night": { "name": "Тариф ночь" }
     }
   }

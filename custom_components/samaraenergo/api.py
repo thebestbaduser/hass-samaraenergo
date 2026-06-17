@@ -37,8 +37,22 @@ class ConsumptionPoint:
 @dataclass
 class TariffInfo:
     tariff_type: str | None = None
+    zone_count: int = 2
     day_rate_rub: float | None = None
+    semi_peak_rate_rub: float | None = None
     night_rate_rub: float | None = None
+
+    @property
+    def day_zone_label(self) -> str:
+        return "пик" if self.zone_count == 3 else "день"
+
+    @property
+    def semi_peak_zone_label(self) -> str:
+        return "полупик"
+
+    @property
+    def night_zone_label(self) -> str:
+        return "ночь"
 
 
 @dataclass
@@ -154,11 +168,30 @@ class SamaraEnergoApi:
 
     @classmethod
     def _parse_contract_account_tariff(cls, contract_account: dict[str, Any]) -> TariffInfo:
-        """Samaraenergo stores tariff on ContractAccount: Ttypbez, Preisbtr1/2."""
+        """Samaraenergo tariff on ContractAccount: Ttypbez, Preisbtr1/2/3.
+
+        2 zones (day/night): Preisbtr1=день, Preisbtr2=ночь, Preisbtr3=0
+        3 zones (peak/semi-peak/night): Preisbtr1=пик, Preisbtr2=полупик, Preisbtr3=ночь
+        """
+        preis1 = _to_float(contract_account.get("Preisbtr1"))
+        preis2 = _to_float(contract_account.get("Preisbtr2"))
+        preis3 = _to_float(contract_account.get("Preisbtr3"))
+        tariff_type = cls._first_text(contract_account, "Ttypbez")
+
+        if preis3 and preis3 > 0:
+            return TariffInfo(
+                tariff_type=tariff_type,
+                zone_count=3,
+                day_rate_rub=preis1,
+                semi_peak_rate_rub=preis2,
+                night_rate_rub=preis3,
+            )
+
         return TariffInfo(
-            tariff_type=cls._first_text(contract_account, "Ttypbez"),
-            day_rate_rub=_to_float(contract_account.get("Preisbtr1")),
-            night_rate_rub=_to_float(contract_account.get("Preisbtr2")),
+            tariff_type=tariff_type,
+            zone_count=2,
+            day_rate_rub=preis1,
+            night_rate_rub=preis2,
         )
 
     @staticmethod

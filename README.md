@@ -67,8 +67,9 @@
 | `avg_monthly_cost` | Среднемесячные затраты, ₽ |
 | `consumption_history` | История потребления (в attributes) |
 | `tariff_type` | Тип тарифа |
-| `tariff_day` | Тариф день, ₽/кВт·ч |
-| `tariff_night` | Тариф ночь, ₽/кВт·ч |
+| `tariff_day` | Тариф день / пик, ₽/кВт·ч (`Preisbtr1`) |
+| `tariff_semi_peak` | Тариф полупик, ₽/кВт·ч (`Preisbtr2`, только 3 зоны) |
+| `tariff_night` | Тариф ночь, ₽/кВт·ч (`Preisbtr2` или `Preisbtr3`) |
 
 ## График в Lovelace
 

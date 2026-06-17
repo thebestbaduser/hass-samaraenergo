@@ -22,6 +22,7 @@ from .const import (
     SENSOR_LAST_READING_DATE,
     SENSOR_TARIFF_DAY,
     SENSOR_TARIFF_NIGHT,
+    SENSOR_TARIFF_SEMI_PEAK,
     SENSOR_TARIFF_TYPE,
 )
 from .coordinator import SamaraEnergoCoordinator
@@ -46,6 +47,7 @@ async def async_setup_entry(
             SamaraEnergoConsumptionHistorySensor(coordinator, entry),
             SamaraEnergoTariffTypeSensor(coordinator, entry),
             SamaraEnergoTariffDaySensor(coordinator, entry),
+            SamaraEnergoTariffSemiPeakSensor(coordinator, entry),
             SamaraEnergoTariffNightSensor(coordinator, entry),
         ]
     )
@@ -252,6 +254,18 @@ class SamaraEnergoTariffTypeSensor(SamaraEnergoBaseSensor):
             return None
         return self.coordinator.data.tariff.tariff_type
 
+    @property
+    def extra_state_attributes(self):
+        if not self.coordinator.data:
+            return {}
+        tariff = self.coordinator.data.tariff
+        return {
+            "zones": tariff.zone_count,
+            "zone_1": tariff.day_zone_label,
+            "zone_2": tariff.semi_peak_zone_label if tariff.zone_count == 3 else tariff.night_zone_label,
+            "zone_3": tariff.night_zone_label if tariff.zone_count == 3 else None,
+        }
+
 
 class SamaraEnergoTariffDaySensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_TARIFF_DAY
@@ -268,6 +282,42 @@ class SamaraEnergoTariffDaySensor(SamaraEnergoBaseSensor):
             return None
         return self.coordinator.data.tariff.day_rate_rub
 
+    @property
+    def extra_state_attributes(self):
+        if not self.coordinator.data:
+            return {}
+        return {"zone": self.coordinator.data.tariff.day_zone_label}
+
+
+class SamaraEnergoTariffSemiPeakSensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_TARIFF_SEMI_PEAK
+    _attr_native_unit_of_measurement = "RUB/kWh"
+    _attr_icon = "mdi:weather-partly-cloudy"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_TARIFF_SEMI_PEAK}"
+
+    @property
+    def available(self) -> bool:
+        return (
+            super().available
+            and self.coordinator.data is not None
+            and self.coordinator.data.tariff.zone_count == 3
+        )
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data or self.coordinator.data.tariff.zone_count != 3:
+            return None
+        return self.coordinator.data.tariff.semi_peak_rate_rub
+
+    @property
+    def extra_state_attributes(self):
+        if not self.coordinator.data:
+            return {}
+        return {"zone": self.coordinator.data.tariff.semi_peak_zone_label}
+
 
 class SamaraEnergoTariffNightSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_TARIFF_NIGHT
@@ -283,3 +333,9 @@ class SamaraEnergoTariffNightSensor(SamaraEnergoBaseSensor):
         if not self.coordinator.data:
             return None
         return self.coordinator.data.tariff.night_rate_rub
+
+    @property
+    def extra_state_attributes(self):
+        if not self.coordinator.data:
+            return {}
+        return {"zone": self.coordinator.data.tariff.night_zone_label}
