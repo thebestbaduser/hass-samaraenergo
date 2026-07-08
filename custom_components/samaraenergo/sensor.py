@@ -19,7 +19,10 @@ from .const import (
     SENSOR_LAST_PAYMENT,
     SENSOR_LAST_PAYMENT_DATE,
     SENSOR_LAST_READING,
+    SENSOR_LAST_READING_DAY,
     SENSOR_LAST_READING_DATE,
+    SENSOR_LAST_READING_NIGHT,
+    SENSOR_LAST_READING_SEMI_PEAK,
 )
 from .coordinator import SamaraEnergoCoordinator
 
@@ -37,6 +40,9 @@ async def async_setup_entry(
             SamaraEnergoLastPaymentSensor(coordinator, entry),
             SamaraEnergoLastPaymentDateSensor(coordinator, entry),
             SamaraEnergoLastReadingSensor(coordinator, entry),
+            SamaraEnergoLastReadingDaySensor(coordinator, entry),
+            SamaraEnergoLastReadingNightSensor(coordinator, entry),
+            SamaraEnergoLastReadingSemiPeakSensor(coordinator, entry),
             SamaraEnergoLastReadingDateSensor(coordinator, entry),
             SamaraEnergoAvgMonthlyConsumptionSensor(coordinator, entry),
             SamaraEnergoAvgMonthlyCostSensor(coordinator, entry),
@@ -160,6 +166,67 @@ class SamaraEnergoLastReadingDateSensor(SamaraEnergoBaseSensor):
         if not self.coordinator.data:
             return None
         return self.coordinator.data.last_reading_date
+
+
+class SamaraEnergoLastReadingDaySensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_LAST_READING_DAY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:weather-sunny"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_LAST_READING_DAY}"
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.last_reading_day_kwh
+
+
+class SamaraEnergoLastReadingNightSensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_LAST_READING_NIGHT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:weather-night"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_LAST_READING_NIGHT}"
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.last_reading_night_kwh
+
+
+class SamaraEnergoLastReadingSemiPeakSensor(SamaraEnergoBaseSensor):
+    _attr_translation_key = SENSOR_LAST_READING_SEMI_PEAK
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:weather-sunset"
+
+    def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data['username']}_{SENSOR_LAST_READING_SEMI_PEAK}"
+
+    @property
+    def available(self) -> bool:
+        return bool(
+            self.coordinator.data
+            and self.coordinator.data.last_reading_semi_peak_kwh is not None
+        )
+
+    @property
+    def native_value(self):
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.last_reading_semi_peak_kwh
 
 
 class SamaraEnergoAvgMonthlyConsumptionSensor(SamaraEnergoBaseSensor):
