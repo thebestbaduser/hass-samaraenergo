@@ -66,6 +66,9 @@ class SamaraEnergoData:
     last_payment_date: datetime | None
     last_reading_kwh: float | None
     last_reading_date: datetime | None
+    last_reading_day_kwh: float | None
+    last_reading_night_kwh: float | None
+    last_reading_semi_peak_kwh: float | None
     avg_monthly_consumption_kwh: float | None
     avg_monthly_cost_rub: float | None
     consumption_history: list[ConsumptionPoint] = field(default_factory=list)
@@ -363,7 +366,9 @@ class SamaraEnergoApi:
         )
         return _to_float(completed.get("Amount")), _parse_sap_date(completed.get("ExecutionDate"))
 
-    async def _get_last_reading(self, device_id: str) -> tuple[float | None, datetime | None]:
+    async def _get_last_reading(
+        self, device_id: str
+    ) -> tuple[float | None, datetime | None, float | None, float | None, float | None]:
         """Return last acknowledged meter reading summed across all zones.
 
         For multi-tariff meters Samaraenergo exposes separate registers (day, night,
@@ -389,20 +394,30 @@ class SamaraEnergoApi:
 
         total_kwh = 0.0
         last_date: datetime | None = None
+        day_kwh: float | None = None
+        night_kwh: float | None = None
+        semi_peak_kwh: float | None = None
 
         for register in registers:
             value = _to_float(register.get("PreviousMeterReadingResult"))
             if value is not None:
                 total_kwh += value
+                register_type = str(register.get("RegisterTypeID", "")).strip()
+                if register_type == "01":
+                    day_kwh = value
+                elif register_type == "02":
+                    night_kwh = value
+                elif register_type == "03":
+                    semi_peak_kwh = value
 
             date = _parse_sap_date(register.get("PreviousMeterReadingDate"))
             if date and (last_date is None or date > last_date):
                 last_date = date
 
         if last_date is None and total_kwh == 0.0:
-            return None, None
+            return None, None, None, None, None
 
-        return total_kwh, last_date
+        return total_kwh, last_date, day_kwh, night_kwh, semi_peak_kwh
 
     async def _get_consumption_history(self, contract_id: str) -> list[ConsumptionPoint]:
         safe_id = contract_id.replace("'", "''")
@@ -460,9 +475,13 @@ class SamaraEnergoApi:
 
         amount_due, due_date = await self._get_amount_due(contract_account_id)
         last_payment_amount, last_payment_date = await self._get_last_payment()
-        last_reading_kwh, last_reading_date = (
-            await self._get_last_reading(device_id) if device_id else (None, None)
-        )
+        (
+            last_reading_kwh,
+            last_reading_date,
+            last_reading_day_kwh,
+            last_reading_night_kwh,
+            last_reading_semi_peak_kwh,
+        ) = await self._get_last_reading(device_id) if device_id else (None, None, None, None, None)
         history = await self._get_consumption_history(contract_id) if contract_id else []
 
         tariff = self._parse_contract_account_tariff(contract_account)
@@ -485,6 +504,9 @@ class SamaraEnergoApi:
             last_payment_date=last_payment_date,
             last_reading_kwh=last_reading_kwh,
             last_reading_date=last_reading_date,
+            last_reading_day_kwh=last_reading_day_kwh,
+            last_reading_night_kwh=last_reading_night_kwh,
+            last_reading_semi_peak_kwh=last_reading_semi_peak_kwh,
             avg_monthly_consumption_kwh=avg_consumption,
             avg_monthly_cost_rub=avg_cost,
             consumption_history=history,
