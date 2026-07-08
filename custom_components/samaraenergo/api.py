@@ -35,6 +35,27 @@ class ConsumptionPoint:
 
 
 @dataclass
+class TariffInfo:
+    tariff_type: str | None = None
+    zone_count: int = 2
+    day_rate_rub: float | None = None
+    semi_peak_rate_rub: float | None = None
+    night_rate_rub: float | None = None
+
+    @property
+    def day_zone_label(self) -> str:
+        return "пик" if self.zone_count == 3 else "день"
+
+    @property
+    def semi_peak_zone_label(self) -> str:
+        return "полупик"
+
+    @property
+    def night_zone_label(self) -> str:
+        return "ночь"
+
+
+@dataclass
 class SamaraEnergoData:
     account_number: str
     address: str
@@ -51,6 +72,7 @@ class SamaraEnergoData:
     avg_monthly_consumption_kwh: float | None
     avg_monthly_cost_rub: float | None
     consumption_history: list[ConsumptionPoint] = field(default_factory=list)
+    tariff: TariffInfo = field(default_factory=TariffInfo)
 
 
 def _parse_sap_date(value: Any) -> datetime | None:
@@ -135,6 +157,47 @@ class SamaraEnergoApi:
         return []
 
     @staticmethod
+    def _first_text(entity: dict[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = entity.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for nested_key in ("Description", "ShortForm", "Name"):
+                    nested = value.get(nested_key)
+                    if isinstance(nested, str) and nested.strip():
+                        return nested.strip()
+        return None
+
+    @classmethod
+    def _parse_contract_account_tariff(cls, contract_account: dict[str, Any]) -> TariffInfo:
+        """Samaraenergo tariff on ContractAccount: Ttypbez, Preisbtr1/2/3.
+
+        2 zones (day/night): Preisbtr1=день, Preisbtr2=ночь, Preisbtr3=0
+        3 zones (peak/semi-peak/night): Preisbtr1=пик, Preisbtr2=полупик, Preisbtr3=ночь
+        """
+        preis1 = _to_float(contract_account.get("Preisbtr1"))
+        preis2 = _to_float(contract_account.get("Preisbtr2"))
+        preis3 = _to_float(contract_account.get("Preisbtr3"))
+        tariff_type = cls._first_text(contract_account, "Ttypbez")
+
+        if preis3 and preis3 > 0:
+            return TariffInfo(
+                tariff_type=tariff_type,
+                zone_count=3,
+                day_rate_rub=preis1,
+                semi_peak_rate_rub=preis2,
+                night_rate_rub=preis3,
+            )
+
+        return TariffInfo(
+            tariff_type=tariff_type,
+            zone_count=2,
+            day_rate_rub=preis1,
+            night_rate_rub=preis2,
+        )
+
+    @staticmethod
     def _entity(payload: Any) -> dict[str, Any]:
         if not isinstance(payload, dict):
             return {}
@@ -183,7 +246,13 @@ class SamaraEnergoApi:
         accounts = self._results(
             await self._request(
                 f"{SERVICE_PATH}/Accounts",
-                {"$expand": "ContractAccounts,ContractAccounts/Contracts/Premise"},
+                {
+                    "$expand": (
+                        "ContractAccounts,"
+                        "ContractAccounts/Contracts/Premise,"
+                        "ContractAccounts/Contracts/Devices"
+                    )
+                },
             )
         )
         if not accounts:
@@ -199,7 +268,13 @@ class SamaraEnergoApi:
         await self._preauth_session()
         payload = await self._request(
             f"{SERVICE_PATH}/Accounts",
-            {"$expand": "ContractAccounts,ContractAccounts/Contracts/Premise"},
+            {
+                "$expand": (
+                    "ContractAccounts,"
+                    "ContractAccounts/Contracts/Premise,"
+                    "ContractAccounts/Contracts/Devices"
+                )
+            },
         )
         accounts = self._results(payload)
         if not accounts:
@@ -265,15 +340,30 @@ class SamaraEnergoApi:
         due_date = _parse_sap_date(invoices[0].get("DueDate"))
         return amount_due, due_date
 
-    async def _get_last_payment(self) -> tuple[float | None, datetime | None]:
+    async def _fetch_payment_documents(self) -> list[dict[str, Any]]:
+        """PaymentDocuments is scoped to the authenticated account session."""
         payload = await self._request(f"{SERVICE_PATH}/PaymentDocuments")
-        payments = self._results(payload)
-        completed = next(
-            (item for item in payments if str(item.get("PaymentStatusID")) == "9"),
-            None,
-        )
-        if not completed:
+        return self._results(payload)
+
+    async def _get_last_payment(self) -> tuple[float | None, datetime | None]:
+        try:
+            payments = [
+                item
+                for item in await self._fetch_payment_documents()
+                if str(item.get("PaymentStatusID")) == "9"
+            ]
+        except SamaraEnergoApiError as err:
+            _LOGGER.warning("Unable to load payment documents: %s", err)
             return None, None
+
+        if not payments:
+            return None, None
+
+        completed = max(
+            payments,
+            key=lambda item: _parse_sap_date(item.get("ExecutionDate"))
+            or datetime.min.replace(tzinfo=UTC),
+        )
         return _to_float(completed.get("Amount")), _parse_sap_date(completed.get("ExecutionDate"))
 
     async def _get_last_reading(
@@ -394,6 +484,8 @@ class SamaraEnergoApi:
         ) = await self._get_last_reading(device_id) if device_id else (None, None, None, None, None)
         history = await self._get_consumption_history(contract_id) if contract_id else []
 
+        tariff = self._parse_contract_account_tariff(contract_account)
+
         avg_consumption = None
         avg_cost = None
         if len(history) > 1:
@@ -418,4 +510,5 @@ class SamaraEnergoApi:
             avg_monthly_consumption_kwh=avg_consumption,
             avg_monthly_cost_rub=avg_cost,
             consumption_history=history,
+            tariff=tariff,
         )

@@ -77,14 +77,13 @@ class SamaraEnergoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @config_entries.callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
-        return SamaraEnergoOptionsFlow(config_entry)
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        return SamaraEnergoOptionsFlow()
 
 
 class SamaraEnergoOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> config_entries.FlowResult:
         from .const import DEFAULT_SCAN_INTERVAL
 

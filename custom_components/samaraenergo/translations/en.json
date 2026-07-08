@@ -42,7 +42,11 @@
       "last_reading_date": { "name": "Reading date" },
       "avg_monthly_consumption": { "name": "Average monthly consumption" },
       "avg_monthly_cost": { "name": "Average monthly cost" },
-      "consumption_history": { "name": "Consumption history" }
+      "consumption_history": { "name": "Consumption history" },
+      "tariff_type": { "name": "Tariff type" },
+      "tariff_day": { "name": "Day rate" },
+      "tariff_semi_peak": { "name": "Semi-peak rate" },
+      "tariff_night": { "name": "Night rate" }
     }
   }
 }
