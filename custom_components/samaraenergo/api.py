@@ -364,20 +364,45 @@ class SamaraEnergoApi:
         return _to_float(completed.get("Amount")), _parse_sap_date(completed.get("ExecutionDate"))
 
     async def _get_last_reading(self, device_id: str) -> tuple[float | None, datetime | None]:
+        """Return last acknowledged meter reading summed across all zones.
+
+        For multi-tariff meters Samaraenergo exposes separate registers (day, night,
+        and optionally semi-peak). The LK "Последние показания" block uses the
+        values from RegistersToRead.PreviousMeterReadingResult, which are the last
+        readings accepted into billing, one per zone.
+
+        We mirror that behaviour and expose a single total reading that is the sum
+        of all registers, using the latest available PreviousMeterReadingDate as
+        the reading timestamp.
+        """
         safe_id = device_id.replace("'", "''")
         payload = await self._request(
             f"{SERVICE_PATH}/Devices('{safe_id}')",
-            {"$expand": "MeterReadingResults"},
+            {"$expand": "RegistersToRead"},
         )
         entity = self._entity(payload)
-        readings = entity.get("MeterReadingResults", {})
-        if isinstance(readings, dict):
-            readings = readings.get("results", [])
-        if not readings:
+        registers = entity.get("RegistersToRead", {})
+        if isinstance(registers, dict):
+            registers = registers.get("results", [])
+        if not registers:
             return None, None
 
-        last = readings[-1]
-        return _to_float(last.get("ReadingResult")), _parse_sap_date(last.get("ReadingDateTime"))
+        total_kwh = 0.0
+        last_date: datetime | None = None
+
+        for register in registers:
+            value = _to_float(register.get("PreviousMeterReadingResult"))
+            if value is not None:
+                total_kwh += value
+
+            date = _parse_sap_date(register.get("PreviousMeterReadingDate"))
+            if date and (last_date is None or date > last_date):
+                last_date = date
+
+        if last_date is None and total_kwh == 0.0:
+            return None, None
+
+        return total_kwh, last_date
 
     async def _get_consumption_history(self, contract_id: str) -> list[ConsumptionPoint]:
         safe_id = contract_id.replace("'", "''")
