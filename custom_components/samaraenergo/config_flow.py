@@ -10,11 +10,17 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import SamaraEnergoApi, SamaraEnergoAuthError, SamaraEnergoApiError
-from .const import ACCOUNT_NUMBER_LENGTH, DOMAIN
+from .api import SamaraEnergoApi, SamaraEnergoApiError, SamaraEnergoAuthError
+from .const import (
+    ACCOUNT_NUMBER_LENGTH,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,9 +60,10 @@ class SamaraEnergoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     info = await _validate_input(self.hass, username, password)
                 except SamaraEnergoAuthError:
                     errors["base"] = "invalid_auth"
-                except SamaraEnergoApiError:
+                except (SamaraEnergoApiError, aiohttp.ClientError, TimeoutError):
                     errors["base"] = "cannot_connect"
-                except aiohttp.ClientError:
+                except Exception:  # noqa: BLE001 — unexpected errors must not crash the flow UI
+                    _LOGGER.exception("Unexpected error validating Samaraenergo credentials")
                     errors["base"] = "cannot_connect"
                 else:
                     await self.async_set_unique_id(username)
@@ -85,8 +92,6 @@ class SamaraEnergoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class SamaraEnergoOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> config_entries.FlowResult:
-        from .const import DEFAULT_SCAN_INTERVAL
-
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
@@ -95,19 +100,14 @@ class SamaraEnergoOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        "scan_interval",
+                        CONF_SCAN_INTERVAL,
                         default=self.config_entry.options.get(
-                            "scan_interval", DEFAULT_SCAN_INTERVAL
+                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=900, max=86400)),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                    ),
                 }
             ),
         )
-
-
-class InvalidAuth(HomeAssistantError):
-    """Invalid authentication."""
-
-
-class CannotConnect(HomeAssistantError):
-    """Cannot connect to API."""
