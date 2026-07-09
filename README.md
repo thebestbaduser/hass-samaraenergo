@@ -80,7 +80,7 @@
 
 - `history_months` — месяцы;
 - `history_kwh` — потребление, кВт·ч;
-- `history_costs` — затраты, ₽.
+- `history_costs` — затраты, ₽ (тот же порядок и длина, что у `history_months` / `history_kwh`; если суммы нет — `null`).
 
 Подходит для [apexcharts-card](https://github.com/RomRider/apexcharts-card) и [mini-graph-card](https://github.com/kalkih/mini-graph-card).
 

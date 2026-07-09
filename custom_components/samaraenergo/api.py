@@ -7,12 +7,16 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
 import aiohttp
 
 from .const import (
     ACCOUNT_NUMBER_LENGTH,
     AUTH_CHECK_PATH,
     BASE_URL,
+    REGISTER_TYPE_DAY,
+    REGISTER_TYPE_NIGHT,
+    REGISTER_TYPE_SEMI_PEAK,
     SERVICE_PATH,
 )
 
@@ -100,6 +104,11 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
+def _odata_escape(value: str) -> str:
+    """Escape a value for use inside an OData single-quoted literal."""
+    return value.replace("'", "''")
+
+
 class SamaraEnergoApi:
     def __init__(self, username: str, password: str, session: aiohttp.ClientSession) -> None:
         self.username = username
@@ -114,6 +123,8 @@ class SamaraEnergoApi:
         }
 
     def _auth_params(self) -> dict[str, str]:
+        # SAP UMC UI authenticates via query params; credentials travel in the URL
+        # the same way the official personal cabinet does.
         return {
             "sap-language": "RU",
             "sap-user": self.username,
@@ -124,24 +135,29 @@ class SamaraEnergoApi:
     async def _request(self, path: str, params: dict[str, Any] | None = None) -> Any:
         url = f"{BASE_URL}{path}"
         query = {**self._auth_params(), **(params or {})}
-        async with self._session.get(
-            url,
-            params=query,
-            headers=self._headers(),
-            timeout=aiohttp.ClientTimeout(total=60),
-        ) as response:
-            text = await response.text()
-            _LOGGER.debug("GET %s status=%s body=%s", path, response.status, text[:300])
-            if response.status == 401:
-                raise SamaraEnergoAuthError("Invalid username or password")
-            if response.status >= 400:
-                raise SamaraEnergoApiError(f"HTTP {response.status} for {path}: {text[:300]}")
-            if not text.strip():
-                return {}
-            try:
-                return await response.json(content_type=None)
-            except aiohttp.ContentTypeError as err:
-                raise SamaraEnergoApiError(f"Invalid JSON from {path}") from err
+        try:
+            async with self._session.get(
+                url,
+                params=query,
+                headers=self._headers(),
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as response:
+                text = await response.text()
+                _LOGGER.debug("GET %s status=%s body=%s", path, response.status, text[:300])
+                if response.status == 401:
+                    raise SamaraEnergoAuthError("Invalid username or password")
+                if response.status >= 400:
+                    raise SamaraEnergoApiError(f"HTTP {response.status} for {path}: {text[:300]}")
+                if not text.strip():
+                    return {}
+                try:
+                    return await response.json(content_type=None)
+                except aiohttp.ContentTypeError as err:
+                    raise SamaraEnergoApiError(f"Invalid JSON from {path}") from err
+        except TimeoutError as err:
+            raise SamaraEnergoApiError(f"Timeout while requesting {path}") from err
+        except aiohttp.ClientError as err:
+            raise SamaraEnergoApiError(f"Connection error while requesting {path}: {err}") from err
 
     @staticmethod
     def _results(payload: Any) -> list[dict[str, Any]]:
@@ -149,7 +165,8 @@ class SamaraEnergoApi:
             return []
         data = payload.get("d", payload)
         if isinstance(data, dict) and "results" in data:
-            return data["results"]
+            results = data["results"]
+            return results if isinstance(results, list) else []
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
@@ -181,7 +198,7 @@ class SamaraEnergoApi:
         preis3 = _to_float(contract_account.get("Preisbtr3"))
         tariff_type = cls._first_text(contract_account, "Ttypbez")
 
-        if preis3 and preis3 > 0:
+        if preis3 is not None and preis3 > 0:
             return TariffInfo(
                 tariff_type=tariff_type,
                 zone_count=3,
@@ -212,22 +229,27 @@ class SamaraEnergoApi:
             "sap-user": self.username,
             "sap-password": self.password,
         }
-        async with self._session.get(
-            url,
-            params=params,
-            headers=self._headers(),
-            allow_redirects=False,
-            timeout=aiohttp.ClientTimeout(total=30),
-        ) as response:
-            text = await response.text()
-            _LOGGER.debug("Pre-auth status=%s body=%s", response.status, text[:300])
-            if "Авторизация не удалась" in text:
-                raise SamaraEnergoAuthError("Invalid username or password")
-            if text and "Пароль начальный" not in text and response.status >= 400:
-                raise SamaraEnergoAuthError("Invalid username or password")
+        try:
+            async with self._session.get(
+                url,
+                params=params,
+                headers=self._headers(),
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                text = await response.text()
+                _LOGGER.debug("Pre-auth status=%s body=%s", response.status, text[:300])
+                if "Авторизация не удалась" in text:
+                    raise SamaraEnergoAuthError("Invalid username or password")
+                if text and "Пароль начальный" not in text and response.status >= 400:
+                    raise SamaraEnergoAuthError("Invalid username or password")
+        except TimeoutError as err:
+            raise SamaraEnergoApiError("Timeout during pre-auth") from err
+        except aiohttp.ClientError as err:
+            raise SamaraEnergoApiError(f"Connection error during pre-auth: {err}") from err
 
     async def _get_password_stat(self) -> int | None:
-        payload = await self._request(f"{SERVICE_PATH}/PasswordStatSet('{self.username}')")
+        payload = await self._request(f"{SERVICE_PATH}/PasswordStatSet('{_odata_escape(self.username)}')")
         entity = self._entity(payload)
         for key in ("PassStat", "passStat", "PASS_STAT"):
             if key in entity:
@@ -321,7 +343,7 @@ class SamaraEnergoApi:
         return account.get("Description") or account.get("AccountID") or ""
 
     async def _get_amount_due(self, contract_account_id: str) -> tuple[float, datetime | None]:
-        safe_id = contract_account_id.replace("'", "''")
+        safe_id = _odata_escape(contract_account_id)
         payload = await self._request(
             f"{SERVICE_PATH}/ContractAccounts('{safe_id}')/Invoices",
         )
@@ -337,7 +359,13 @@ class SamaraEnergoApi:
             sum(_to_float(item.get("AmountRemaining")) or 0.0 for item in invoices),
             2,
         )
-        due_date = _parse_sap_date(invoices[0].get("DueDate"))
+        # Prefer the earliest unpaid due date — that is what the cabinet highlights.
+        due_dates = [
+            due
+            for item in invoices
+            if (due := _parse_sap_date(item.get("DueDate"))) is not None
+        ]
+        due_date = min(due_dates) if due_dates else None
         return amount_due, due_date
 
     async def _fetch_payment_documents(self) -> list[dict[str, Any]]:
@@ -380,7 +408,11 @@ class SamaraEnergoApi:
         of all registers, using the latest available PreviousMeterReadingDate as
         the reading timestamp.
         """
-        safe_id = device_id.replace("'", "''")
+        empty = (None, None, None, None, None)
+        if not device_id:
+            return empty
+
+        safe_id = _odata_escape(device_id)
         payload = await self._request(
             f"{SERVICE_PATH}/Devices('{safe_id}')",
             {"$expand": "RegistersToRead"},
@@ -390,37 +422,39 @@ class SamaraEnergoApi:
         if isinstance(registers, dict):
             registers = registers.get("results", [])
         if not registers:
-            return None, None
+            return empty
 
         total_kwh = 0.0
         last_date: datetime | None = None
         day_kwh: float | None = None
         night_kwh: float | None = None
         semi_peak_kwh: float | None = None
+        has_value = False
 
         for register in registers:
             value = _to_float(register.get("PreviousMeterReadingResult"))
             if value is not None:
+                has_value = True
                 total_kwh += value
                 register_type = str(register.get("RegisterTypeID", "")).strip()
-                if register_type == "01":
+                if register_type == REGISTER_TYPE_DAY:
                     day_kwh = value
-                elif register_type == "02":
+                elif register_type == REGISTER_TYPE_NIGHT:
                     night_kwh = value
-                elif register_type == "03":
+                elif register_type == REGISTER_TYPE_SEMI_PEAK:
                     semi_peak_kwh = value
 
             date = _parse_sap_date(register.get("PreviousMeterReadingDate"))
             if date and (last_date is None or date > last_date):
                 last_date = date
 
-        if last_date is None and total_kwh == 0.0:
-            return None, None, None, None, None
+        if last_date is None and not has_value:
+            return empty
 
         return total_kwh, last_date, day_kwh, night_kwh, semi_peak_kwh
 
     async def _get_consumption_history(self, contract_id: str) -> list[ConsumptionPoint]:
-        safe_id = contract_id.replace("'", "''")
+        safe_id = _odata_escape(contract_id)
         period_payload = await self._request(
             f"{SERVICE_PATH}/GetCurrentBillingPeriod",
             {"ContractID": f"'{safe_id}'"},
@@ -465,13 +499,13 @@ class SamaraEnergoApi:
         account = await self._get_account()
         contract_account, contract, account = self._pick_primary_contract(account)
 
-        contract_account_id = contract_account.get("ContractAccountID", "")
-        contract_id = contract.get("ContractID", "")
+        contract_account_id = str(contract_account.get("ContractAccountID") or "")
+        contract_id = str(contract.get("ContractID") or "")
 
         devices = contract.get("Devices", {})
         if isinstance(devices, dict):
             devices = devices.get("results", [])
-        device_id = devices[0].get("DeviceID") if devices else ""
+        device_id = str(devices[0].get("DeviceID") or "") if devices else ""
 
         amount_due, due_date = await self._get_amount_due(contract_account_id)
         last_payment_amount, last_payment_date = await self._get_last_payment()
@@ -481,7 +515,7 @@ class SamaraEnergoApi:
             last_reading_day_kwh,
             last_reading_night_kwh,
             last_reading_semi_peak_kwh,
-        ) = await self._get_last_reading(device_id) if device_id else (None, None, None, None, None)
+        ) = await self._get_last_reading(device_id)
         history = await self._get_consumption_history(contract_id) if contract_id else []
 
         tariff = self._parse_contract_account_tariff(contract_account)

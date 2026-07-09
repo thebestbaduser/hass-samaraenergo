@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -19,8 +20,8 @@ from .const import (
     SENSOR_LAST_PAYMENT,
     SENSOR_LAST_PAYMENT_DATE,
     SENSOR_LAST_READING,
-    SENSOR_LAST_READING_DAY,
     SENSOR_LAST_READING_DATE,
+    SENSOR_LAST_READING_DAY,
     SENSOR_LAST_READING_NIGHT,
     SENSOR_LAST_READING_SEMI_PEAK,
     SENSOR_TARIFF_DAY,
@@ -34,7 +35,7 @@ from .coordinator import SamaraEnergoCoordinator
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: SamaraEnergoCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
@@ -59,28 +60,25 @@ async def async_setup_entry(
     )
 
 
-class SamaraEnergoBaseSensor(CoordinatorEntity, SensorEntity):
+class SamaraEnergoBaseSensor(CoordinatorEntity[SamaraEnergoCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._entry = entry
-        data = coordinator.data
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.data["username"])},
             name=f"Самараэнерго {entry.data['username']}",
             manufacturer="ПАО Самараэнерго",
             model="Личный кабинет",
+            configuration_url="https://lk.samaraenergo.ru/",
         )
-        if data:
-            self._attr_device_info["configuration_url"] = "https://lk.samaraenergo.ru/"
-            if data.address:
-                self._attr_device_info["suggested_area"] = data.address
 
 
 class SamaraEnergoAmountDueSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_AMOUNT_DUE
     _attr_native_unit_of_measurement = "RUB"
+    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:cash-clock"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
@@ -113,6 +111,7 @@ class SamaraEnergoDueDateSensor(SamaraEnergoBaseSensor):
 class SamaraEnergoLastPaymentSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_LAST_PAYMENT
     _attr_native_unit_of_measurement = "RUB"
+    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:cash-check"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
@@ -225,8 +224,9 @@ class SamaraEnergoLastReadingSemiPeakSensor(SamaraEnergoBaseSensor):
 
     @property
     def available(self) -> bool:
-        return bool(
-            self.coordinator.data
+        return (
+            super().available
+            and self.coordinator.data is not None
             and self.coordinator.data.last_reading_semi_peak_kwh is not None
         )
 
@@ -257,6 +257,7 @@ class SamaraEnergoAvgMonthlyConsumptionSensor(SamaraEnergoBaseSensor):
 class SamaraEnergoAvgMonthlyCostSensor(SamaraEnergoBaseSensor):
     _attr_translation_key = SENSOR_AVG_MONTHLY_COST
     _attr_native_unit_of_measurement = "RUB"
+    _attr_device_class = SensorDeviceClass.MONETARY
     _attr_icon = "mdi:chart-line"
 
     def __init__(self, coordinator: SamaraEnergoCoordinator, entry: ConfigEntry) -> None:
@@ -303,7 +304,8 @@ class SamaraEnergoConsumptionHistorySensor(SamaraEnergoBaseSensor):
             ],
             "history_kwh": [point.kwh for point in history],
             "history_months": [point.month for point in history],
-            "history_costs": [point.cost for point in history if point.cost is not None],
+            # Keep index alignment with history_months / history_kwh for Lovelace charts.
+            "history_costs": [point.cost for point in history],
         }
 
 

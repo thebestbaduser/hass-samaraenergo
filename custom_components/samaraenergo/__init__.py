@@ -10,7 +10,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
+from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .coordinator import SamaraEnergoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +40,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator: SamaraEnergoCoordinator = hass.data[DOMAIN][entry.entry_id]
-    scan_interval = entry.options.get("scan_interval", coordinator.update_interval.total_seconds())
+    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     coordinator.update_interval = timedelta(seconds=scan_interval)
     await coordinator.async_request_refresh()

@@ -8,10 +8,11 @@ from datetime import timedelta
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import SamaraEnergoApi, SamaraEnergoApiError, SamaraEnergoAuthError, SamaraEnergoData
-from .const import CONF_PASSWORD, CONF_USERNAME, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_PASSWORD, CONF_SCAN_INTERVAL, CONF_USERNAME, DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class SamaraEnergoCoordinator(DataUpdateCoordinator[SamaraEnergoData]):
             password=entry.data[CONF_PASSWORD],
             session=session,
         )
-        scan_interval = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+        scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
             hass,
             _LOGGER,
@@ -36,6 +37,8 @@ class SamaraEnergoCoordinator(DataUpdateCoordinator[SamaraEnergoData]):
         try:
             return await self.api.async_get_data()
         except SamaraEnergoAuthError as err:
-            raise UpdateFailed(f"Authentication failed: {err}") from err
+            raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
         except SamaraEnergoApiError as err:
             raise UpdateFailed(str(err)) from err
+        except aiohttp.ClientError as err:
+            raise UpdateFailed(f"Connection error: {err}") from err
